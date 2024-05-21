@@ -1,30 +1,39 @@
 from random import *
 import time
-import decimal
+from concurrent.futures import ProcessPoolExecutor
 
 
-def is_prime(num):
-    k, p = 0, num - 1
-    while (p & 1) == 0:  # 满足n - 1 = k * 2 ^ p
-        p = p >> 1
+def is_prime(the_num, rounds=6):  # 判断是否为素数
+    if the_num <= 1:
+        return False
+    if the_num <= 3:
+        return True
+    if the_num % 2 == 0:
+        return False
+
+    # Write num - 1 as 2^k * p
+    k, p = 0, the_num - 1
+    while (p & 1) == 0:
+        p >>= 1
         k += 1
-    for j in range(6):  # 循环测试6次
-        a = randint(1, num - 1)
-        b = pow(a, p, num)  # a的p次方对num取余
-        flag = 0
-        if b == 1:
-            continue  # 余数是1, 通过测试
-        # 余数不是1， 进入循环
-        for i in range(k):
-            if (b + 1) % num == 0:
-                flag = 1
-                break
-            else:
-                b = (b * b) % num
-        if flag == 1:
-            continue
-        else:
+
+    def check_composite(a, num, the_p, the_k):
+        b = pow(a, the_p, num)
+        if b == 1 or b == num - 1:
             return False
+        for _ in range(the_k - 1):
+            b = pow(b, 2, num)
+            if b == num - 1:
+                return False
+        return True
+
+    # Perform the test for the given number of rounds
+
+    for _ in range(rounds):
+        a_random = randint(2, the_num - 2)
+        if check_composite(a_random, the_num, p, k):
+            return False
+
     return True
 
 
@@ -139,13 +148,14 @@ def decimal_str(bits):  # 十进制转字符串
     returns : 对应的字符
     """
     temp = ""
-    for i in range(len(bits) // 3):
-        temp += chr(int(bits[i * 3:(i + 1) * 3]))  # chr将10进制转成ASCII
+    # for i in range(len(bits) // 3):
+    #     temp += chr(int(bits[i * 3:(i + 1) * 3]))  # chr将10进制转成ASCII
+    for i in range(0, len(bits), 3):
+        temp += chr(int(bits[i:i + 3]))
     return temp
 
 
 def RSA_encryption(message):
-    # e, n, d = generate_key(p, q)
     global e1, n1
     ciphertext = ""
     plaintext = str_decimal(message)  # 明文块
@@ -160,27 +170,45 @@ def RSA_encryption(message):
     return ciphertext
 
 
+def decrypt_block(block, d, n):
+    # Decrypts a single block and returns the result as a zero-padded string
+    return str(pow(int(block), d, n)).zfill(3)
+
+
 def RSA_decryption(de_file):
     global n1, d1
-    print("n:", n1)
-    print("d:", d1)
-    cipher = []
-    plaintext = ""
+    # print("n:", n1)
+    # print("d:", d1)
     message = read_de_file(de_file)
     length_n1 = len(str(n1))
-    length_message = len(message)
-    for i in range(0, length_message, length_n1):
-        mes_block = ""
-        for j in range(length_n1):
-            mes_block += message[i + j]
-        cipher.append(mes_block)
-    length_ciper = len(cipher)
-    for i in range(length_ciper):
-        m = str(pow(decimal.Decimal(cipher[i]), d1, n1))  # 恢复明文过程
-        if len(m) < 3:
-            for j in range(3 - len(m)):
-                m = '0' + m  # 不足3位补0
-        plaintext += m
+    #####################################################################################
+    # length_message = len(message)
+    # for i in range(0, length_message, length_n1):
+    #     mes_block = ""
+    #     for j in range(length_n1):
+    #         mes_block += message[i + j]
+    #     cipher.append(mes_block)
+    # length_ciper = len(cipher)
+    # for i in range(length_ciper):
+    #     # m = str(pow(decimal.Decimal(cipher[i]), d1, n1))  # 恢复明文过程
+    #     m = str(pow(int(cipher[i]), d1, n1))  # 恢复明文过程
+    #     # 不足3位补0
+    #     m = m.zfill(3)
+    #     plaintext += m
+    #####################################################################################
+
+    # Split the message into blocks and decrypt each block
+    cipher_blocks = (message[i:i + length_n1] for i in range(0, len(message), length_n1))
+
+    # Use multiprocessing to decrypt blocks in parallel
+    with ProcessPoolExecutor() as executor:
+        cipher_blocks_list = list(cipher_blocks)
+        decrypted_blocks = list(
+            executor.map(decrypt_block, cipher_blocks_list, [d1] * len(cipher_blocks_list),
+                         [n1] * len(cipher_blocks_list)))
+
+    # Decrypt blocks and build the plaintext
+    plaintext = ''.join(decrypted_blocks)
 
     plaintext = decimal_str(plaintext)
     return plaintext
@@ -194,8 +222,8 @@ def start():
     if t == '0':
         print("输入要加密的文件: ", end='')
         files_name = input()
-        p_in = generate_large_prime(45)  # 35万亿到70万亿
-        q_in = generate_large_prime(45)
+        p_in = generate_large_prime(1000)  # 2^(size-1) to 2^size
+        q_in = generate_large_prime(1000)
         file_content = read_raw_file(files_name)
         e1, n1, d1 = generate_key(p_in, q_in)
         tic = time.perf_counter()
